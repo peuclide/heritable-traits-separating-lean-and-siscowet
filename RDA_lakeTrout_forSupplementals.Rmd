@@ -1,0 +1,628 @@
+---
+title: "Lake Trout RDA analysis"
+author: "Peter Euclide"
+date: "2/28/2020"
+output: html_document
+---
+
+
+# Analysis steps
+ 1. conduct RDA with phenotype as predictors within each cross - this should help describe the individual variance in SNP GTs and how they relate to phenotype.
+ 2. find SNPs that have high loadings with any RDA axis within each cross. These are SNPs that seem to exmplain the most variance and could be associated with phenotype
+ 3. find SNPs that have high loadings in ALL of the crosses - these are consistent and therefore are not associated with neutral structure
+ 4. find the correlation of the intersecting SNPs with actual phenotype (fat, condition).
+ 5. find the SNPs that correlate in the same direction (either positive or negative) - many SNPs seemed to have strong correlations, but not in the same direction. Consistent pos and neg correlation indicates higher probability of meaning something.
+ 6. find the sum of positive alleles in these consistent correlation SNPs in each individual and plot - because we know the already correlate, it is not surprising that we get a pos correlation. But what we did not know was that they would be additive. Each SNP alone might correlate, but this shows that the more pos alleles you have, the fatter you are. 
+
+
+
+
+```{r setup}
+
+library(tidyverse)
+library(adegenet)
+library(vegan)
+library(poppr)
+library(ggsci)
+library(ggpubr)
+library(knitr)
+library(ggVennDiagram)
+library(VennDiagram)
+
+mypal = pal_igv("default", alpha = 0.7)(13)
+mypal = funky(20)
+
+mypalJama = pal_jama("default", alpha = 0.7)(7)
+
+## plotting functions:
+
+RDA_scatter <- function(x, choices, title){
+  plot(x,choices=choices, main = title, type="n", scaling=3)
+  points(x, display="species", pch=20, cex=0.7, col="gray32", scaling=3,choices=choices)           # the SNPs
+  points(x, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[family],choices=choices) # the individuals
+  text(x, scaling=3, display="bp", col="#0868ac", cex=1,choices=choices)                           # the predictors
+  legend("bottomright", legend=levels(family), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg) 
+  
+}
+
+
+PCA_scatter <- function(x, choices, title){
+  plot(x,choices=choices, main = title, type="n", scaling=3,  xlab=paste("PC1 (", round((pca$CA$eig[1]/sum(pca$CA$eig))*100, 1), "%)", sep = ""),ylab=paste("PC2 (", round((pca$CA$eig[2]/sum(pca$CA$eig))*100, 1), "%)", sep = "")
+)
+  #points(x, display="species", pch=20, cex=0.7, col="gray32", scaling=3,choices=choices)           # the SNPs
+  points(x, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[family],choices=choices) # the individuals
+  #text(x, scaling=3, display="bp", col="#0868ac", cex=1,choices=choices)                           # the predictors
+  legend("bottomright", legend=levels(family), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg) 
+}
+
+# load tails of distribution - this is the function to ID putatively significant correlations: +/- 3 standard dees
+outliers <- function(x,z){
+  lims <- mean(x) + c(-1, 1) * z * sd(x)     # find loadings +/-z sd from mean loading     
+  x[x < lims[1] | x > lims[2]]               # locus names in these tails
+}
+
+
+
+
+
+# candidate functions
+
+find_candidates <- function(x){
+  
+  load.rda_LS <- scores(x, choices=c(1:3), display="species")
+  
+  # ID outliers for each axis
+  cand1_LS <- outliers(load.rda_LS[,1],3)
+  cand2_LS <- outliers(load.rda_LS[,2],3)
+  cand3_LS <- outliers(load.rda_LS[,3],3)
+  
+  # make DF of candidates
+  cand1_LS <- cbind.data.frame(rep(1,times=length(cand1_LS)), names(cand1_LS), unname(cand1_LS))
+  cand2_LS <- cbind.data.frame(rep(2,times=length(cand2_LS)), names(cand2_LS), unname(cand2_LS))
+  cand3_LS <- cbind.data.frame(rep(3,times=length(cand3_LS)), names(cand3_LS), unname(cand3_LS))
+  colnames(cand1_LS) <- colnames(cand2_LS) <- colnames(cand3_LS) <- c("axis","snp","loading")
+  rbind(cand1_LS,cand2_LS,cand3_LS)
+  
+}
+
+find_cands_cor <- function(x){
+  foo <- matrix(nrow=length(consistent_cands), ncol=2)  # 3 columns for 3 predictors
+  colnames(foo) <- c("meanFat", "meanK")
+  i=1
+  
+  for (i in 1:length(consistent_cands)) {
+    nam <- consistent_cands[i]
+    snp.gen <- x[,nam]
+    foo[i,] <- apply(x[,c("meanFat", "meanK")],2,function(x) cor(x,snp.gen))
+  }
+  
+  cbind.data.frame(consistent_cands,foo)
+  
+}
+
+correlateSearch <- function(cand) {
+  for (i in 1:length(cand$consistent_cands)) {
+    bar <- cand[i,]
+    cand[i,4] <- names(which.max(abs(bar[2:3]))) # gives the variable
+    cand[i,5] <- cand[i,names(which.max(abs(bar[2:3])))]              # gives the absolute value of the correlation
+  } 
+  colnames(cand)[4] <- "predictor"
+  colnames(cand)[5] <- "correlation"
+  cand
+}
+
+```
+
+```{r data setup}
+dat95 <- read.table("./data/LT_90_parsed_genotype_calls.txt", header=F)
+
+dat95_t <- t(dat95)
+colnames(dat95_t) <- c("SampleID", dat95_t[3,2:ncol(dat95_t)])
+dat95_t <- as.data.frame(dat95_t[8:nrow(dat95_t),])
+
+# customize bio dat to get single mean values for wt, length, fat, and rankFat
+bio_data <- read.csv("./data/master_BioData_ranks_poSAL.csv")
+
+bio_data <- bio_data %>% mutate(K = 100000*weight_g/length_mm^3) %>% group_by(SampleID) %>% summarise(cross = first(cross), family =paste(first(dam_col), first(sire_col), sep = "_"), sire=first(sire_col),dam=first(dam_col), meanRank = first(meanRank), meanFat=first(meanFat), meanWT = mean(weight_g, na.rm=T), meanLen=mean(length_mm, na.rm = T), meanK=mean(K, na.rm=T), tank = nth(tank, 3)) 
+
+dat95_t <- as.data.frame(dat95_t)
+
+dat95_t <- left_join(dat95_t, bio_data, by = "SampleID")
+
+
+dat95_SS <- filter(dat95_t, cross == "SxS")
+dat95_LS <- filter(dat95_t, cross == "LxS")
+dat95_SL <- filter(dat95_t, cross == "SxL")
+dat95_LL <- filter(dat95_t, cross == "LxL")
+
+
+## fill in missing data with most common GT in each cross
+
+#fill with most common GT
+gen.imp_SS <- apply(dat95_SS[,2:(ncol(dat95_SS)-10)], 2, function(x) recode(x, `1`=1, `0`=0, `2`=2, `9` = as.numeric(names(which.max(table(x))))))
+gen.imp_LS <- apply(dat95_LS[,2:(ncol(dat95_LS)-10)], 2, function(x) recode(x, `1`=1, `0`=0, `2`=2, `9` = as.numeric(names(which.max(table(x))))))
+gen.imp_SL <- apply(dat95_SL[,2:(ncol(dat95_SL)-10)], 2, function(x) recode(x, `1`=1, `0`=0, `2`=2, `9` = as.numeric(names(which.max(table(x))))))
+gen.imp_LL <- apply(dat95_LL[,2:(ncol(dat95_LL)-10)], 2, function(x) recode(x, `1`=1, `0`=0, `2`=2, `9` = as.numeric(names(which.max(table(x))))))
+
+dat95_SS_imp <- as.data.frame(cbind(dat95_SS[,c(1,(ncol(dat95_SS)-9):ncol(dat95_SS))], gen.imp_SS))
+dat95_LS_imp <- as.data.frame(cbind(dat95_LS[,c(1,(ncol(dat95_LS)-9):ncol(dat95_LS))], gen.imp_LS))
+dat95_SL_imp <- as.data.frame(cbind(dat95_SL[,c(1,(ncol(dat95_SL)-9):ncol(dat95_SL))], gen.imp_SL))
+dat95_LL_imp <- as.data.frame(cbind(dat95_LL[,c(1,(ncol(dat95_LL)-9):ncol(dat95_LL))], gen.imp_LL))
+
+
+```
+
+## 
+
+```{r}
+
+# bi-plots for final phenotype factors for colinearity
+# less than 0.7
+
+
+#cor.test($)
+
+# variance inflation factor
+# (should be below 10, would like to be below)
+# influence that factors have on eachother. 
+# zaret et al.
+
+
+
+```
+
+
+
+
+## RDA of all data combined
+
+```{r overall RDA}
+# combine back together
+dat95_imp <- rbind(dat95_SS_imp, dat95_LS_imp, dat95_SL_imp, dat95_LL_imp)
+
+# we know that mean fat and mean rank are strongly correlated so only use one
+pheno <- dat95_imp[,c("family", "cross","meanFat", "meanWT",  "meanLen", "meanK", "tank")]
+
+
+## check colinearity
+#png("C:/Users/peuclide/OneDrive - purdue.edu/UWSP_Larson_2018/projects/Lake_trout/ME_REVISIONS/pairs_panels.png")
+psych::pairs.panels(pheno[,1:6])
+#dev.off()
+
+## RDA
+
+# define genotype data (first columns having to do with genotypes)
+GT <- dat95_imp[,12:(ncol(dat95_imp))]
+
+pca <- rda(GT)
+family <- as.factor(pheno$cross)
+levels(family) <- c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)")
+bg=mypalJama
+
+
+#tiff("./figures/PCA_scatter.tiff", width=4800,height=4800, pointsize = 120 )
+PCA_scatter(pca, c(1,2), "All Crosses")
+#dev.off()
+
+
+## co-linearity
+
+cor.test(pheno$meanFat,pheno$meanWT)
+cor.test(pheno$meanLen,pheno$meanWT)
+cor.test(pheno$meanFat,pheno$meanLen)
+
+psych::pairs.panels(pheno[,3:7], scale=T)
+
+
+RDA_tot <- rda(formula = GT ~ meanFat+meanK+cross, data = pheno)
+vif.cca(RDA_tot)
+
+RsquareAdj(RDA_tot)
+summary(eigenvals(RDA_tot, model = "constrained"))
+(aov_tmp <- anova(RDA_tot))
+
+
+family <- as.factor(pheno$cross)
+bg <-mypal
+
+RDA_scatter(RDA_tot, c(1,2), "All Crosses")
+
+#- covary will inflate both len and wt. add condition factor 
+#- 
+### VIF for families and cross is high leading to an overly explanatory model. Therefore we chose to remove family and cross as variables.
+
+RDA_tot <- rda(formula = GT ~ meanFat+meanK, data = pheno)
+vif.cca(RDA_tot)
+
+
+
+```
+
+## PCA of cross
+
+```{r}
+
+# pca_scat_dat <- rda(dat95)
+# 
+# ggPCA_scatter <- function(x, choices, title){
+#  
+#   
+#    plot(x,choices=choices, main = title, type="n", scaling=3,  xlab=paste("PC1 (", round((pca$CA$eig[1]/sum(pca$CA$eig))*100, 1), "%)", sep = ""),ylab=paste("PC2 (", round((pca$CA$eig[2]/sum(pca$CA$eig))*100, 1), "%)", sep = "")
+# )
+#   #points(x, display="species", pch=20, cex=0.7, col="gray32", scaling=3,choices=choices)           # the SNPs
+#   points(x, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[family],choices=choices) # the individuals
+#   #text(x, scaling=3, display="bp", col="#0868ac", cex=1,choices=choices)                           # the predictors
+#   legend("bottomright", legend=levels(family), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg) 
+# }
+# #tiff("./figures/PCA_scatter.tiff", width=4800,height=4800, pointsize = 120 )
+# PCA_scatter(pca, c(1,2), "")
+
+
+#dev.off()
+
+
+uscores <- data.frame(pca$CA$u[,1:10])
+
+uscores$cross <- as.factor(dat95_imp$cross)
+
+levels(uscores$cross) <- c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)")
+
+PCA_scat_plot <- ggplot(uscores, aes(x = PC1, y = PC2, color = cross))+
+  geom_point( alpha = .7)+
+  labs(x=paste("PC1 (", round((pca$CA$eig[1]/sum(pca$CA$eig))*100, 1), "%)", sep = ""),y=paste("PC2 (", round((pca$CA$eig[2]/sum(pca$CA$eig))*100, 1), "%)", sep = ""), color = "")+
+  theme_bw()+
+  scale_color_jama()+
+  theme(text = element_text(size = 10), legend.position ="none")
+
+
+PCA_scat_plot
+
+```
+
+---
+
+## Part 1 and 2:  conduct RDA within each cross type
+
+__purpose:__ Due to neutral genetic structure, the relationship between phenotype and genotype is confounded. By looking within crosses we can partially account for this.
+
+
+```{r cross specific RDA}
+
+family <- unique(pheno$cross)
+
+aov_p <- NULL
+aov_F <- NULL
+aov_fam <- NULL
+cands <- NULL
+aov_df <- NULL
+
+bg=mypal
+
+f=family[1]
+
+for(f in family) {
+  
+  #filter to family
+  dat_tmp <- dat95_imp[dat95_imp$cross==f,]
+  
+  # define genotype data (first columns having to do with genotypes)
+  GT_tmp <- dat_tmp[,12:(ncol(dat95_imp))]
+
+    # we know that mean fat and mean rank are strongly correlated so only use one
+  pheno_tmp <- dat_tmp[,c("family", "cross","meanFat",    "meanWT",  "meanLen", "meanK")]
+  
+# run RDA
+  RDA_tmp <- rda(formula = GT_tmp ~ meanFat+meanK, data = pheno_tmp) ## took out meanWT because it was correlated with length
+  family <- as.factor(pheno_tmp$family)
+  
+  #tiff(paste("./figures/PCA_scatter", f,".tiff", sep = ""), width=2400,height=2400, pointsize = 60 )
+  RDA_scatter(RDA_tmp, c(1,2), f)
+  #dev.off()
+  
+  # test significance
+  aov_tmp <- anova(RDA_tmp)
+  aov_p <- c(aov_p, aov_tmp$`Pr(>F)`[1])
+  aov_F <- c(aov_F, aov_tmp$F[1])
+  aov_df <- c(aov_df, aov_tmp$Df[2])
+  aov_fam <- c(aov_fam, f)
+
+  # find candidates
+  tmp_cands <- find_candidates(RDA_tmp)
+  tmp_cands$fam <- f
+  cands <- rbind(cands, tmp_cands)
+  
+}
+
+
+(aov_results <- as.data.frame(cbind(aov_fam, aov_p, aov_F)))
+
+```
+
+---
+
+## Part 3: find intersection of all RDA candidates
+
+__Purpose:__ There will always be candidate loci that have high loadings based on our detection strategy. But by looking only at the ones that are outliers in all crosses we can limit the number of false positive detections.
+
+```{r cands intersection}
+## part 3: find intersection of all cands
+
+cands_list <- list(as.character(cands[cands$fam=="SxS","snp"]), as.character(cands[cands$fam=="SxL","snp"]),as.character(cands[cands$fam=="LxS","snp"]),as.character(cands[cands$fam=="LxL","snp"]))
+consistent_cands <- Reduce(intersect, cands_list)
+
+
+candidates_ven <- split(cands$snp, cands$fam)
+venn <- ggVennDiagram(candidates_ven, label = "count")+theme(text=element_text(size = 10), legend.position = "none")
+#ggsave("./figures/RDA_venn_5-4.tiff")
+#venn.diagram(candidates_ven, filename ="./RDA_ven.png", height = 1000, width = 1000)
+venn
+
+```
+
+---
+
+## Part 4: find correlations of top candidates within each cross.
+
+__Purpose:__ Candidates were identified based on RDA loadings, so we need to determine their actual correlation with phenotype. We need to still run this within cross because we want to ID SNPs that have a consistent association with phenotype.
+
+```{r correlations of intersection}
+
+### correlate each SNP with each phenotype
+cands_cor_SS <- find_cands_cor(dat95_SS_imp)
+cands_cor_LS <- find_cands_cor(dat95_LS_imp)
+cands_cor_SL <- find_cands_cor(dat95_SL_imp)
+cands_cor_LL <- find_cands_cor(dat95_LL_imp)
+
+### figure out which phenotype each SNP correlates the most too
+cands_cor_SS <- correlateSearch(cands_cor_SS)
+cands_cor_LS <- correlateSearch(cands_cor_LS)
+cands_cor_SL <- correlateSearch(cands_cor_SL)
+cands_cor_LL <- correlateSearch(cands_cor_LL)
+
+
+
+
+
+
+```
+
+---
+
+## Part 5: find all candiates SNPs that have a consistent positive or negative correlation across all crosses. These are SNPs that are both outliers, and correlate with body form in some way.
+
+__Purpose:__ Even though a SNP might not have the highest correlation with the phenotype in question, it was still a candidate. So here we can look for all the SNPs with correlations in the same direction and again look for the overlap between crosses. SNPs with similar direction correlations across all crosses are more likely to be associated with the phenotype than if it is positive in one cross and negative in another.
+
+```{r posFat cor}
+pos_fat_cands_SS <- cands_cor_SS %>% filter(meanFat > 0)
+pos_fat_cands_LS <- cands_cor_LS %>% filter(meanFat > 0)
+pos_fat_cands_SL <- cands_cor_SL %>% filter(meanFat > 0)
+pos_fat_cands_LL <- cands_cor_LL %>% filter(meanFat > 0)
+
+fat_cands_list <- list(as.character(pos_fat_cands_SS$consistent_cands), 
+                       as.character(pos_fat_cands_LS$consistent_cands),
+                       as.character(pos_fat_cands_SL$consistent_cands),
+                       as.character(pos_fat_cands_LL$consistent_cands))
+
+# ID overlap
+(fat_consistent_poscor <- Reduce(intersect, fat_cands_list))
+
+neg_fat_cands_SS <- cands_cor_SS %>% filter(meanFat < 0)
+neg_fat_cands_LS <- cands_cor_LS %>% filter(meanFat < 0)
+neg_fat_cands_SL <- cands_cor_SL %>% filter(meanFat < 0)
+neg_fat_cands_LL <- cands_cor_LL %>% filter(meanFat < 0)
+
+fat_cands_list <- list(as.character(neg_fat_cands_SS$consistent_cands), 
+                       as.character(neg_fat_cands_LS$consistent_cands),
+                       as.character(neg_fat_cands_SL$consistent_cands),
+                       as.character(neg_fat_cands_LL$consistent_cands))
+# ID overlap
+(fat_consistent_negcor <- Reduce(intersect, fat_cands_list))
+
+
+fat_consistent_cor <- c(fat_consistent_negcor, fat_consistent_poscor)
+
+
+x <- bind_cols(cands_cor_SS %>% filter(consistent_cands %in% fat_consistent_cor), cands_cor_SL %>% filter(consistent_cands %in% fat_consistent_cor),cands_cor_LS %>% filter(consistent_cands %in% fat_consistent_cor),cands_cor_LL %>% filter(consistent_cands %in% fat_consistent_cor))
+
+x <- x %>% select("consistent_cands...1", starts_with("meanFat"))
+colnames(x) <- c("SNP", "cor SS", "cor SL", "cor LS", "cor LL")
+x$pheno <- "Lipid"
+kable(x, digits = 2)
+
+lipid_cor_tab <- x
+
+```
+
+
+```{r posK cor}
+pos_K_cands_SS <- cands_cor_SS %>% filter(meanK > 0)
+pos_K_cands_LS <- cands_cor_LS %>% filter(meanK > 0)
+pos_K_cands_SL <- cands_cor_SL %>% filter(meanK > 0)
+pos_K_cands_LL <- cands_cor_LL %>% filter(meanK > 0)
+
+K_cands_list <- list(as.character(pos_K_cands_SS$consistent_cands), 
+                       as.character(pos_K_cands_LS$consistent_cands),
+                       as.character(pos_K_cands_SL$consistent_cands),
+                       as.character(pos_K_cands_LL$consistent_cands))
+
+# ID overlap
+(K_consistent_poscor <- Reduce(intersect, K_cands_list))
+
+neg_K_cands_SS <- cands_cor_SS %>% filter(meanK < 0)
+neg_K_cands_LS <- cands_cor_LS %>% filter(meanK < 0)
+neg_K_cands_SL <- cands_cor_SL %>% filter(meanK < 0)
+neg_K_cands_LL <- cands_cor_LL %>% filter(meanK < 0)
+
+K_cands_list <- list(as.character(neg_K_cands_SS$consistent_cands), 
+                       as.character(neg_K_cands_LS$consistent_cands),
+                       as.character(neg_K_cands_SL$consistent_cands),
+                       as.character(neg_K_cands_LL$consistent_cands))
+# ID overlap
+(K_consistent_negcor <- Reduce(intersect, K_cands_list))
+
+
+K_consistent_cor <- c(K_consistent_negcor, K_consistent_poscor)
+
+
+x <- bind_cols(cands_cor_SS %>% filter(consistent_cands %in% K_consistent_cor), cands_cor_SL %>% filter(consistent_cands %in% K_consistent_cor),cands_cor_LS %>% filter(consistent_cands %in% K_consistent_cor),cands_cor_LL %>% filter(consistent_cands %in% K_consistent_cor))
+
+
+x <- x %>% select("consistent_cands...1", starts_with("meanK"))
+
+#x <- x[,c("consistent_cands","meanK", "meanK1", "meanK2", "meanK3")]
+colnames(x) <- c("SNP", "cor SS", "cor SL", "cor LS", "cor LL")
+x$pheno <- "K"
+kable(x, digits =2)
+
+K_cor_tab <- x
+
+#write.csv(bind_rows(lipid_cor_tab, K_cor_tab), "Y:/Peter/Projects/Lake_trout/RDA/cands_1-8-21.csv")
+
+```
+
+---
+
+## Part 6: subset to just consistent correlation candidates
+
+__Purpose:__ Based on the overlap above, we can subset to just the 16 candidates that had similar directional correlations with phenotype in each cross. Then we can ID the positive allele based on genotype, and plot the sum of these alleles to look at additive effects. 
+
+```{r sum pos al fat}
+
+# filter to positive and negative SNPs only
+dat_pos_cands <- dat95_imp %>% select( "SampleID","cross",starts_with("mean"), fat_consistent_poscor)
+dat_neg_cands <- dat95_imp %>% select( "SampleID","cross",starts_with("mean"), fat_consistent_negcor)
+
+# recode negative correlations to ID positive alleles
+dat_neg_cands_recode <- apply(dat_neg_cands[,8:ncol(dat_neg_cands)], 2, function(x) recode(x, `1`=1, `0`=2, `2`=0))
+dat_pos_cands_recode <- cbind(dat_pos_cands, dat_neg_cands_recode)
+dat_pos_cands_recode <- dat_pos_cands_recode %>% mutate(posAlsum = rowSums(.[8:ncol(.)]))
+
+
+### check normality
+
+qq1 <- ggqqplot(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxS","posAlsum"])+ggtitle("SxS")
+shapiro.test(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxS","posAlsum"])
+hist(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxS","posAlsum"], xlab = 'posAlsum')
+
+qq2 <- ggqqplot(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxL","posAlsum"])+ggtitle("SxL")
+shapiro.test(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxL","posAlsum"])
+hist(dat_pos_cands_recode[dat_pos_cands_recode$cross=="SxL","posAlsum"], xlab = 'posAlsum')
+
+qq3 <- ggqqplot(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxS","posAlsum"])+ggtitle("LxS")
+shapiro.test(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxS","posAlsum"])
+hist(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxS","posAlsum"], xlab = 'posAlsum')
+
+qq4 <- ggqqplot(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxL","posAlsum"])+ggtitle("LxL")
+shapiro.test(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxL","posAlsum"])
+hist(dat_pos_cands_recode[dat_pos_cands_recode$cross=="LxL","posAlsum"], xlab = 'posAlsum')
+
+
+ggarrange(qq1,qq2, qq3,qq4)
+               
+
+# plot relationshipo
+fat_cor_plot <- ggplot(dat_pos_cands_recode, aes(x=posAlsum, y = meanFat, color = cross))+
+  geom_point(alpha = 0.7)+
+  geom_smooth(method="lm")+
+  scale_color_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  #stat_cor(method = "pearson", show.legend = F)+
+  labs(x="Sum of positive affect alleles", y = "Fatmeter Reading")+
+  theme_bw()+
+  theme(text = element_text(size = 10), legend.position = "none")
+
+
+library(broom)
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "SxS",]
+ss_cor_fat <- tidy(cor.test(dataCor$meanFat, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "SxL",]
+sl_cor_fat <- tidy(cor.test(dataCor$meanFat, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "LxS",]
+ls_cor_fat <- tidy(cor.test(dataCor$meanFat, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "LxL",]
+ll_cor_fat <- tidy(cor.test(dataCor$meanFat, dataCor$posAlsum ))
+
+comb_cor_lipid <- bind_rows(ll_cor_fat, ls_cor_fat, sl_cor_fat, ss_cor_fat) %>% mutate(cross = c("LxL", "LxS", "SxL", "SxS"), trait = "lipid", R2 = estimate^2)
+
+comb_cor_lipid
+
+### percent explained varience overall
+ af <- anova(lm(meanFat~posAlsum+cross, dat_pos_cands_recode))
+ afss <- af$"Sum Sq"
+(PerExpLipid <- cbind(af,PctExp=afss/sum(afss)*100))
+
+
+```
+
+```{r sum pos al K, fig.width=10, fig.height=10}
+
+# filter to positive and negative SNPs only
+dat_pos_cands <- dat95_imp %>% select( "SampleID","cross",starts_with("mean"), K_consistent_poscor)
+dat_neg_cands <- dat95_imp %>% select( "SampleID","cross",starts_with("mean"), K_consistent_negcor)
+
+# recode negative correlations to ID positive alleles
+#dat_neg_cands_recode <- apply(dat_neg_cands[,8:ncol(dat_neg_cands)], 2, function(x) recode(x, `1`=1, `0`=2, `2`=0))
+#dat_pos_cands_recode <- cbind(dat_pos_cands, dat_neg_cands_recode)
+dat_pos_cands_recode <- dat_pos_cands
+dat_pos_cands_recode <- dat_pos_cands_recode %>% mutate(posAlsum = rowSums(.[8:ncol(.)]))
+
+# plot relationship
+K_cor_plot <- ggplot(dat_pos_cands_recode, aes(x=posAlsum, y = meanK, color = cross))+
+  geom_point(alpha = 0.7)+
+  geom_smooth(method="lm")+
+  scale_color_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  #stat_cor(method = "pearson", show.legend = F)+
+  labs(x="Sum of positive affect alleles", y = "K")+
+  theme_bw()+
+  theme(text = element_text(size = 10), legend.position = "none")
+
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "SxS",]
+ss_cor_k <- tidy(cor.test(dataCor$meanK, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "SxL",]
+sl_cor_k <- tidy(cor.test(dataCor$meanK, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "LxS",]
+ls_cor_k <- tidy(cor.test(dataCor$meanK, dataCor$posAlsum ))
+
+dataCor= dat_pos_cands_recode[dat_pos_cands_recode$cross == "LxL",]
+ll_cor_k <- tidy(cor.test(dataCor$meanK, dataCor$posAlsum ))
+
+comb_cor_k <- bind_rows(ll_cor_k, ls_cor_k, sl_cor_k, ss_cor_k) %>% mutate(cross = c("LxL", "LxS", "SxL", "SxS"), trait = "K", R2 = estimate^2)
+
+
+comb_cor_k
+
+
+### percent explained varience overall
+ af <- anova(lm(meanK~posAlsum+cross, dat_pos_cands_recode))
+ afss <- af$"Sum Sq"
+(PerExpK <- cbind(af,PctExp=afss/sum(afss)*100))
+
+
+
+p1 <- ggarrange(fat_cor_plot, K_cor_plot, labels = c( "C", "D"), common.legend = T , legend = "bottom", ncol = 2)
+
+p2 <- ggarrange(PCA_scat_plot, venn, labels = c("A", "B"), ncol = 2)
+
+
+ggarrange(p2, p1, ncol = 1, nrow=2,heights = c(.75, 1))
+
+
+```
+
+
+
+```{r, fig.height=18, fig.width=12}
+ggarrange(fat_cor_plot, K_cor_plot, ncol = 2, nrow =1)
+
+```
+
+
+---
+
+
+---

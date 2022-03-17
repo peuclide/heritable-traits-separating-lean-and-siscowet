@@ -1,0 +1,30 @@
+# Map from 
+# 
+# Available as part of R/qtl book package, https://github.com/kbroman/qtlbook
+crosstype: f2
+geno: genotypes_3-10-21.csv
+pheno: phenotypes_3-10-21.csv
+#phenocovar: iron_phenocovar.csv
+covar: covariates_3-10-21.csv
+gmap: map_3-10-21.csv
+alleles:
+- A
+- B
+genotypes:
+  A: 1
+  H: 2
+  B: 3
+sex:
+  covar: sex
+  F: female
+  M: male
+cross_info:
+  covar: cross
+  LxL: 0
+  LxS: 1
+  SxL: 2
+  SxS: 3
+#x_chr: X
+na.strings:
+- '-'
+- NA

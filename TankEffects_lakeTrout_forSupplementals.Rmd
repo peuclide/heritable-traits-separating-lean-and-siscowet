@@ -1,0 +1,116 @@
+---
+title: "Tank Effects"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+
+```
+
+## Table of tank contents in numbers of fish by year
+
+```{r}
+bio_data <- read.csv("./data/master_BioData_ranks_poSAL.csv")
+
+
+kable(bio_data %>% group_by(year, tank, cross) %>% summarise(Number_of_fish=n()))
+
+kable(bio_data %>% group_by(year, cross) %>% summarise(Number_of_fish=n()))
+
+
+```
+
+
+## Tank effects on lipid 
+
+NOTE: fatmeter data not collected during years 2013 - 2014
+```{r}
+
+ggplot(bio_data, aes(x = as.factor(tank), y = fatmeter, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+```
+
+### Tank effects during 2017 through 2019 when tanks were held constant
+
+```{r}
+data2016_2019 = bio_data %>% filter(year >2016)
+
+anova(lm(fatmeter~as.character(tank)+as.character(year)+cross,data = data2016_2019))
+
+ggplot(data2016_2019, aes(x = as.factor(tank), y = fatmeter, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+
+broom::tidy(TukeyHSD(aov(fatmeter~as.character(tank)+as.character(year)+cross,data = data2016_2019)))
+dfat <- broom::tidy(TukeyHSD(aov(fatmeter~as.character(tank)+as.character(year)+cross,data = data2016_2019)))
+
+
+```
+
+
+## Tank effects on length 
+
+```{r}
+
+ggplot(bio_data, aes(x = as.factor(tank), y = length_mm, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+```
+
+### Tank effects during 2017 through 2019 when tanks were held constant
+
+```{r}
+data2016_2019 = bio_data %>% filter(year >2016)
+
+ggplot(data2016_2019, aes(x = as.factor(tank), y = length_mm, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+anova(lm(length_mm~as.character(tank)+as.character(year)+cross,data = data2016_2019))
+
+broom::tidy(TukeyHSD(aov(length_mm~as.character(tank)+as.character(year),data = data2016_2019)))
+dlen <- broom::tidy(TukeyHSD(aov(length_mm~as.character(tank)+as.character(year),data = data2016_2019)))
+
+```
+
+## Tank effects on weight 
+
+```{r}
+
+ggplot(bio_data, aes(x = as.character(tank), y = weight_g, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+```
+
+### Tank effects during 2017 through 2019 when tanks were held constant
+
+```{r}
+data2016_2019 = bio_data %>% filter(year >2016)
+
+ggplot(data2016_2019, aes(x = as.character(tank), y = weight_g, fill = cross))+
+  geom_boxplot()+
+  facet_wrap(~year)+
+  theme_bw()
+
+anova(lm(weight_g~as.character(tank)+as.character(year),data = data2016_2019))
+
+broom::tidy(TukeyHSD(aov(weight_g~as.character(tank)+as.character(year)+cross,data = data2016_2019)))
+
+dwt <- broom::tidy(TukeyHSD(aov(weight_g~as.character(tank)+as.character(year)+cross,data = data2016_2019)))
+
+```

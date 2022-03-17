@@ -1,0 +1,661 @@
+---
+title: "4 Phenotypic cross differences"
+author: "Peter Euclide"
+date: "4/15/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggsci)
+library(ggpubr)
+library(knitr)
+library(rstatix)
+
+```
+
+
+
+# Main 2-way ANOVA results
+
+```{r}
+biodat <- read.csv("./data/master_BioData_ranks_poSAL.csv")
+BioDat1to3 <- read.csv("./data/F1-biochemical-lipid.csv")
+
+BioDat1to3 <- BioDat1to3 %>% mutate(year = as.character(year))
+
+tmpDatFat <- biodat %>%
+  filter(year>2014,!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% mutate(year = as.character(year))
+tmpDatLenWt <- biodat %>%
+  filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% mutate(year = as.character(year))
+
+
+
+
+kable(tidy(aov(fat.dry ~ cross*year,BioDat1to3)), caption="fat 2012 to 2014")
+
+kable(tidy(aov(fatmeter~cross*year, tmpDatFat)), caption="fat 2015 to 2019")
+
+kable(tidy(aov(length_mm~cross*year, tmpDatLenWt)), caption="length")
+
+kable(tidy(aov(weight_g~cross*year, tmpDatLenWt)), caption="weight")
+
+```
+
+### write tukey results for ALL analyses.
+
+This script supersedes Tukey test run individually later in this script.
+
+```{r}
+
+write.csv(tidy(TukeyHSD(aov(fat.dry ~ cross*year,BioDat1to3))),"./Tukfat12-14.csv")
+write.csv(tidy(TukeyHSD(aov(fatmeter~cross*year, tmpDatFat))),"./Tukfat15-19.csv")
+write.csv(tidy(TukeyHSD(aov(length_mm~cross*year, tmpDatLenWt))),"./TukLen12-19.csv")
+write.csv(tidy(TukeyHSD(aov(weight_g~cross*year, tmpDatLenWt))),"./TukWtfat12-19.csv")
+
+```
+
+
+# Lipid content 
+
+
+```{r, fig.height=8}
+
+
+ggqqplot(biodat %>% filter(year>2014, !sampling_date%in% c("5/27/2015", "5/28/2015")), "fatmeter", facet.by = c("year", "cross"))
+#ggsave("qq_lipid.png")
+
+
+ggplot(biodat %>% filter(year>2014,!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = cross, y = fatmeter, fill= cross))+
+  geom_boxplot(alpha =.9)+
+  facet_wrap(~year)+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Fatmeter Reading", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+#ggsave("fat_boxplots.tiff", width = 8, height = 5)
+
+
+```
+
+
+__ANOVA test results for lipid content:__
+
+```{r fat statistical tests - anova}
+# ad_aov <- biodat %>%
+#   filter(year>2014,!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   do(tidy(aov(fatmeter ~ cross*as.factor(year)))) 
+# 
+# 
+# 
+# ad_aov
+
+```
+
+
+__Tukey HSD test results for lipid content:__
+
+```{r fat statistical tests - tukey}
+# TukHSD <- biodat %>%
+#   filter(year>2014, !sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   do(tidy(TukeyHSD(aov(.$fatmeter ~ .$cross*as.factor(.$year),
+#                  ))))
+# 
+# kable(TukHSD, format =  "simple", digits = 3)
+
+```
+
+
+```{r, include = F}
+
+
+
+
+fat_plot <- ggplot(biodat %>% filter(year>2014,!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = fatmeter, fill= cross))+
+  geom_boxplot(alpha =.9, position=position_dodge(0.85))+
+  #facet_wrap(~year)+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Fatmeter Reading", x = "")+
+  theme(text=element_text(size = 16), legend.position = "bottom")#+
+  #geom_text(data=fat.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, position = position_dodge(.85), size = 3)
+
+
+```
+
+
+## Lipid years 1 - 3
+
+```{r}
+ 
+
+
+####### combined datasets
+bdat1 <- biodat %>% filter(year>2014,!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% select("year", "cross", "fatmeter") %>% mutate(year = as.character(year))
+bdat2 <- BioDat1to3 %>% select("year", "cross", "fat.dry") %>% mutate(year = as.character(year))
+colnames(bdat2) <- c("year", "cross", "fatmeter")
+
+ggqqplot(BioDat1to3 %>% select("year", "cross", "fat.dry"), "fat.dry", facet.by = c("year", "cross"))
+#ggsave("./qq_fat12-14.png")
+
+
+bdat <- bind_rows(bdat2, bdat1)
+#tukDat <- bind_rows(fat.summarized2, fat.summarized)
+  
+fat_plot3 <- ggplot(bdat, aes(x = as.character(year), y = fatmeter, fill= cross))+
+  geom_boxplot(alpha = 0.9, position=position_dodge(.85), outlier.shape = 1, geom = 'linerange', colour = "gray")+
+  geom_boxplot(aes(ymin=..lower.., ymax=..upper..), alpha = 0.9, position=position_dodge(.85), outlier.shape = 1)+    geom_vline(xintercept=3.5, color="red", size=1, linetype = 2)+
+  #facet_wrap(~year)+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Lipid Content", x = "")+
+  theme(text=element_text(size = 16), legend.position = "bottom")#+
+  #geom_text(data=tukDat,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3,hjust=-.15, position = position_dodge(.85), size = 3)  
+  
+```
+
+
+# Length (mm)
+
+
+```{r length, fig.height=8}
+
+
+
+ggqqplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), "length_mm", facet.by = c("year", "cross"), scales="free")
+#ggsave("C:/Users/peuclide/OneDrive - purdue.edu/UWSP_Larson_2018/projects/Lake_trout/ME_REVISIONS/qq_len.png")
+
+
+ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = cross, y = length_mm, fill= cross))+
+  geom_boxplot()+
+  facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Length (mm)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+Len_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = length_mm, fill= cross))+
+  geom_boxplot()+
+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Length (mm)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+
+```
+
+
+
+__ANOVA test results for length (mm):__
+
+```{r length statistical tests - anova}
+# ad_aov <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   #group_by(year) %>% 
+#   do(tidy(aov(.$length_mm ~ .$cross*as.factor(.$year)
+#                  )))
+# 
+# kable(ad_aov, digits = 3,format =  "simple")
+
+```
+
+__Tukey HSD test results for length (mm):__
+
+
+```{r length statistical tests - tukey}
+# TukHSD <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   #group_by(year) %>% 
+#   do(tidy(TukeyHSD(aov(.$length_mm ~ .$cross*as.factor(.$year)
+#                  ))))
+# 
+# 
+# kable(TukHSD, digits = 3,format =  "simple")
+
+```
+
+```{r, include = F}
+
+
+
+len_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = length_mm, fill= cross))+
+  geom_boxplot(alpha = 0.9, position=position_dodge(.85), outlier.shape = 1, geom = 'linerange', colour = "gray")+
+  geom_boxplot(aes(ymin=..lower.., ymax=..upper..), alpha = 0.9, position=position_dodge(.85), outlier.shape = 1)+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Length (mm)", x = "")+
+  theme(text=element_text(size = 16), legend.position = "bottom")#+
+  #geom_text(data=len.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, hjust = -.15, position = position_dodge(.85), size = 3)
+  #geom_text(data=K.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, position = position_dodge2(1))+
+  # annotate("text",x = .6, y = .9, label = "c")+
+  # annotate("text",x = .6+.25, y = .9, label = "c")+
+  # annotate("text",x = .6+.25+.25, y = .95, label = "c")
+
+
+len_plot
+
+```
+
+
+# Weight (g)
+
+
+```{r weight, fig.height=8}
+
+
+
+ggqqplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), "weight_g", facet.by = c("year", "cross"), scales="free")
+#ggsave("./qq_wt.png")
+
+
+
+ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = cross, y = weight_g, fill= cross))+
+  geom_boxplot()+
+  facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Weight (g)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+Wt_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = weight_g, fill= cross))+
+  geom_boxplot()+
+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Weight (g)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+
+```
+
+
+
+__ANOVA test results for Weight (g):__
+
+```{r wt statistical tests - anova}
+# ad_aov <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   #group_by(year) %>% 
+#   do(tidy(aov(.$weight_g ~ .$cross*as.factor(.$year)
+#                  )))
+# 
+# kable(ad_aov, digits = 3,format =  "simple")
+
+```
+
+__Tukey HSD test results for Weight (g):__
+
+
+```{r wt statistical tests - tukey}
+# TukHSD <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% 
+#   #group_by(year) %>% 
+#   do(tidy(TukeyHSD(aov(.$weight_g ~ .$cross*as.factor(.$year)
+#                  ))))
+# 
+# 
+# kable(TukHSD, digits = 3,format =  "simple")
+
+```
+
+```{r, include = F}
+
+
+
+Wt_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = weight_g, fill= cross))+
+  geom_boxplot(alpha = 0.9, position=position_dodge(.85), outlier.shape = 1, geom = 'linerange', colour = "gray")+
+  geom_boxplot(aes(ymin=..lower.., ymax=..upper..), alpha = 0.9, position=position_dodge(.85), outlier.shape = 1)+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Weight (g)", x = "Year")+
+  theme(text=element_text(size = 16), legend.position = "bottom")#+
+  #geom_text(data=wt.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, hjust = -.15, position = position_dodge(.85),  size = 3)
+  #geom_text(data=K.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, position = position_dodge2(1))+
+  # annotate("text",x = .6, y = .9, label = "c")+
+  # annotate("text",x = .6+.25, y = .9, label = "c")+
+  # annotate("text",x = .6+.25+.25, y = .95, label = "c")
+
+
+Wt_plot
+
+```
+
+
+# Condition Factor
+
+
+```{r condition factor, fig.height=8}
+
+### KTL  = 100000W/L3
+
+biodat <- biodat %>% mutate(K = 100000*weight_g/length_mm^3)
+
+ggqqplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), "K", facet.by = c("year", "cross"), scales="free")
+
+
+
+ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = cross, y = K, fill= cross))+
+  geom_boxplot()+
+  facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Condition factor (K)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+K_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = K, fill= cross))+
+  geom_boxplot()+
+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Condition factor (K)", x = "Cross")+
+  theme(text=element_text(size = 16), legend.position = "bottom")
+
+
+
+```
+
+
+
+__ANOVA test results for condition factor:__
+
+```{r K statistical tests - anova}
+# ad_aov <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% group_by(year) %>% 
+#   do(tidy(aov(.$K ~ .$cross,
+#                  )))
+# 
+# kable(ad_aov, digits = 3,format =  "simple")
+
+```
+
+__Tukey HSD test results for condition factor:__
+
+
+```{r K statistical tests - tukey}
+# TukHSD <- biodat %>%
+#   filter(!sampling_date%in% c("5/27/2015", "5/28/2015")) %>% group_by(year) %>% 
+#   do(tidy(TukeyHSD(aov(.$K ~ .$cross,
+#                  ))))
+# 
+# 
+# kable(TukHSD, digits = 3,format =  "simple")
+
+```
+
+```{r, include = F}
+
+TukHSD_dat <- biodat %>%
+  filter(year>2011, !sampling_date%in% c("5/27/2015", "5/28/2015"))
+
+
+years=unique(TukHSD_dat$year)
+dat=data.frame(cross=as.character(), K=as.numeric(), groups=as.character())
+for(y in years) {
+  hsd=agricolae::HSD.test(aov(K ~ cross+year, data = TukHSD_dat[TukHSD_dat$year == y,]),trt= c("cross"), group=T)
+  hsdGrp <- hsd$groups %>% rownames_to_column(var="cross") %>% mutate(year = y)
+  dat <- bind_rows(dat, hsdGrp)
+  
+}
+  
+
+K.summarized = biodat %>% filter(year>2011,!sampling_date%in% c("5/27/2015", "5/28/2015")) %>%  group_by(cross, year) %>% summarize(UQR=quantile(K, .75, na.rm = T)) %>% left_join(.,dat, by = c("year", "cross"))
+
+
+
+K_plot <- ggplot(biodat %>% filter(!sampling_date%in% c("5/27/2015", "5/28/2015")), aes(x = as.character(year), y = K, fill= cross))+
+  geom_boxplot(alpha = 0.9, position=position_dodge(.85), outlier.shape = 1, geom = 'linerange', colour = "gray")+
+  geom_boxplot(aes(ymin=..lower.., ymax=..upper..), alpha = 0.9, position=position_dodge(.85), outlier.shape = 1)+
+  #facet_wrap(~year, scales = "free")+
+  theme_bw()+
+  #scale_fill_discrete(name = "Dose", )
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  labs(y = "Condition factor (K)", x = "Year")+
+  theme(text=element_text(size = 16), legend.position = "bottom")+
+  geom_text(data=K.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, hjust = -.15, position = position_dodge(.85))
+  #geom_text(data=K.summarized,aes(x=as.character(year),y=UQR,group = cross,label=groups),vjust=-0.3, position = position_dodge2(1))+
+  # annotate("text",x = .6, y = .9, label = "c")+
+  # annotate("text",x = .6+.25, y = .9, label = "c")+
+  # annotate("text",x = .6+.25+.25, y = .95, label = "c")
+
+
+K_plot
+
+```
+
+
+
+```{r Figure 1, fig.height=10, fig.width=8}
+
+# fats <- ggarrange(fat_plot2, fat_plot, legend = "none", nrow =1, ncol = 2, widths = c(1,3))
+
+
+ggarrange(fat_plot3, len_plot,Wt_plot, common.legend = T, nrow =3, ncol = 1, labels = c("A", "B", "C"))
+#ggsave("ME_REVISIONS/Fig1.tiff", width = 8, height = 10)
+#ggsave("ME_REVISIONS/Fig1.pdf", width = 8, height = 10)
+
+
+#ggsave("C:/Users/peuclide/OneDrive - UWSP/UWSP_Larson_2018/projects/Lake_trout/Figures/Fig1c.tiff", width = 8)
+
+
+```
+
+# Growth
+
+```{r, fig.height=8}
+library(FSA)
+library(nlstools)
+library(car)
+library(ggplot2)
+
+# get sex for each individual
+
+vb_data <- biodat %>% select(cross, SampleID, year, length_mm) %>% mutate(age = as.numeric(as.factor(year)))
+vb_data <- drop_na(vb_data)
+
+ggplot(vb_data, aes(x = age, y = length_mm, color = cross))+
+  geom_point()+
+  facet_wrap(~cross)+
+  theme_bw()+
+  scale_color_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  theme(legend.position = "bottom")
+
+
+ll_starts <- vbStarts(length_mm~age, data= vb_data %>% filter(cross == "LxL"))
+ls_starts <- vbStarts(length_mm~age, data= vb_data %>% filter(cross == "LxS"))
+sl_starts <- vbStarts(length_mm~age, data= vb_data %>% filter(cross == "SxL"))
+ss_starts <- vbStarts(length_mm~age, data= vb_data %>% filter(cross == "SxS"))
+
+## fit model
+vbTypical <- length_mm~Linf*(1-exp(-K*(age-t0)))
+
+fitTypical_ll <- nls(vbTypical,data=vb_data %>% filter(cross == "LxL"),start=ll_starts)
+fitTypical_ls <- nls(vbTypical,data=vb_data %>% filter(cross == "LxS"),start=ls_starts)
+fitTypical_sl <- nls(vbTypical,data=vb_data %>% filter(cross == "SxL"),start=sl_starts)
+fitTypical_ss <- nls(vbTypical,data=vb_data %>% filter(cross == "SxS"),start=ss_starts)
+
+# bootstrap confidence intervals
+
+bootTypical_ll <- nlsBoot(fitTypical_ll, niter=999)
+bootTypical_ls <- nlsBoot(fitTypical_ls, niter=999)
+bootTypical_sl <- nlsBoot(fitTypical_sl, niter=999)
+bootTypical_ss <- nlsBoot(fitTypical_ss, niter=999)
+
+```
+
+## LxL Growth
+
+```{r}
+
+tidy(fitTypical_ll)
+
+confint(bootTypical_ll, plot=T)
+
+
+
+```
+
+## LxS Growth
+
+```{r}
+
+tidy(fitTypical_ls)
+
+confint(bootTypical_ls, plot=T)
+
+```
+
+## SxL Growth
+
+```{r}
+
+tidy(fitTypical_sl)
+
+confint(bootTypical_sl, plot=T)
+
+```
+
+## SxS Growth
+
+```{r}
+
+tidy(fitTypical_ss)
+
+confint(bootTypical_ss, plot=T)
+
+```
+
+
+```{r}
+library(ggridges)
+
+combined_Boot <- rbind(data.frame(bootTypical_ll$coefboot) %>% mutate(cross = "LxL"), 
+                       data.frame(bootTypical_ls$coefboot) %>% mutate(cross = "LxS"),
+                       data.frame(bootTypical_sl$coefboot) %>% mutate(cross = "SxL"),
+                       data.frame(bootTypical_ss$coefboot) %>% mutate(cross = "SxS"))
+
+
+Linf_p <- ggplot(combined_Boot, aes(x=Linf, y = cross, fill =cross))+
+  geom_density_ridges(bandwidth=1)+
+scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  theme_bw()+
+  xlab(expression("L"~infinity))+
+  theme(legend.position = "bottom")
+
+K_p <- ggplot(combined_Boot, aes(x=K, y = cross, fill =cross))+
+  geom_density_ridges(bandwidth = 0.0025)+
+  scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  theme_bw()+
+  theme(legend.position = "bottom")
+ 
+
+t0_p <- ggplot(combined_Boot, aes(x=t0, y = cross, fill =cross))+
+  geom_density_ridges(bandwidth=0.005)+
+scale_fill_jama(labels = c("Lean (F) x Lean (M)", "Lean (F) x Siscowet (M)", "Siscowet (F) x Lean (M)", "Siscowet (F) x Siscowet (M)"), guide =guide_legend(nrow =2))+
+  theme_bw()+
+  theme(legend.position = "bottom")
+
+VB_stats <- ggarrange(Linf_p, K_p, t0_p, common.legend = T, ncol=3, nrow=1, legend = "bottom", labels = c("B", "C", "D"))
+
+```
+
+
+
+## Combined Von B growth curves
+
+this section is run interactively and requiiies users to follow documentation for the FSA package.
+
+http://derekogle.com/fishR/examples/oldFishRVignettes/VonBertalanffy.pdf
+
+```{r}
+
+#predict2 <- function(x) predict(x,data.frame(age=ages))
+#ages <- seq(-1,10,by=0.2)
+#
+#
+#x <- fitTypical_ll
+#predict3 <- function(x){
+#  f.boot2 <- Boot(x,f=predict2)
+#  preds1 <- data.frame(ages,
+#                     predict(x,data.frame(age=ages)),
+#                     confint(f.boot2))
+#  names(preds1) <- c("age","fit","LCI","UCI")
+#  preds1
+#}
+#
+#f.boot_ll <- predict3(fitTypical_ll)
+#f.boot_ls <- predict3(fitTypical_ls)
+#f.boot_sl <- predict3(fitTypical_sl)
+#f.boot_ss <- predict3(fitTypical_ss)
+#
+#xx=Boot(fitTypical_ll,f=predict2)
+#preds1 <- data.frame(ages,
+#                     predict(fitTypical_ll,data.frame(age=ages)),
+#                     confint(xx))
+#
+## preds1 <- data.frame(ages,
+##                      predict(fitTypical_ll,data.frame(age=ages)),
+##                      confint(f.boot2))
+## names(preds1) <- c("age","fit","LCI","UCI")
+#
+## LL_plot <- ggplot() + 
+##   geom_ribbon(data=f.boot_ll %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="red")+
+##   geom_point(data=vb_data %>% filter(cross == "LxL"), aes(y = length_mm, x=age))
+## 
+## LS_plot <- ggplot() + 
+##   geom_ribbon(data=f.boot_ls %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="firebrick")+
+##   geom_point(data=vb_data %>% filter(cross == "LxS"), aes(y = length_mm, x=age))
+## 
+## SL_plot <- ggplot() + 
+##   geom_ribbon(data=f.boot_sl %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="blue")+
+##   geom_point(data=vb_data %>% filter(cross == "SxL"), aes(y = length_mm, x=age))
+## 
+## SS_plot <- ggplot() + 
+##   geom_ribbon(data=f.boot_ss %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="steelblue")+
+##   geom_point(data=vb_data %>% filter(cross == "SxS"), aes(y = length_mm, x=age))
+## 
+## ggarrange(LL_plot, LS_plot, SL_plot, SS_plot)
+#
+#
+#mypalJama = pal_jama("default", alpha = 0.7)(7)
+#
+#VB_p <- ggplot() + 
+#  geom_ribbon(data=f.boot_ll %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="#374E55B2")+
+#  geom_ribbon(data=f.boot_ls %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="#DF8F44B2")+
+#  geom_ribbon(data=f.boot_sl %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="#00A1D5B2")+
+#  geom_ribbon(data=f.boot_ss %>% #filter(age>=0&age<=9),aes(x=age,ymin=LCI,ymax=UCI),fill="#B24745B2")+
+#  labs(x = "Age", y = "Length (mm)")+
+#  scale_x_continuous(breaks=c(0:9))+
+#  theme_bw()
+#
+
+```
+
+
+```{r Figure 2, fig.width=8, fig.height=8}
+
+#ggarrange(VB_p, VB_stats, nrow = 2, ncol = 1, labels = "A", label.x = 0)
+#ggsave("C:/Users/peuclide/OneDrive - #UWSP/UWSP_Larson_2018/projects/Lake_trout/Figures/Growth_figure.tiff")
+
+```
+
+
